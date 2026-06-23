@@ -1,6 +1,6 @@
 # poreallas
 
-Mortality rate projection using seasonal forecast ensembles.
+Mortality rate projection using seasonal forecast ensembles. Loosely based on Carleton et al 2022 (https://doi.org/10.3386/w27599).
 
 > [!WARNING]
 > This is an incomplete toy prototype. This is not suitable for a production environment.
@@ -25,24 +25,18 @@ The current configurations are:
 * POREALLAS_SOCIOECONOMICS_URI: URI to file with each region's GDP per capita (gdppc).
 * POREALLAS_EFFECTS_URI: Optional URI to write Zarr store of projected mortality effects. Will not write output if unset.
 
-These are used to run the prototype in `project.py` and in `scripts/` for downloads, parsing, and cleaning.
+These are used to run the prototype in `scripts/` for downloads, parsing/cleaning, and projecting.
 
 Each of these variables can point to data in cloud storage or local storage. 
 
 ### Projecting
 
-Projections can be run using the non-interactive script in `scripts/` or the example projection notebook in `./project.py`. You will need access to the parsed input data described above before running a projection.
+Projections can be run using the non-interactive script in `scripts/`. You will need access to the parsed input data described above before running a projection.
 
 Run the projection script with
 
 ```shell
 uv run scripts/05-project_effects.py
-```
-
-Alternatively, setup and run the example projection notebook by running
-
-```shell
-uv run marimo edit project.py
 ```
 
 from the root of this repository.
