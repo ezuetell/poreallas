@@ -51,7 +51,6 @@ s51 = (
 s51.name = "tas"
 s51 = s51.to_dataset()
 
-
 # Make "valid_time" the "time" dim and main time dim and reducing it to a single
 # dimension so xsdba's QDM can run this against the `ref` data. Version of
 # xsdba we're running with seems to require a "time" dim to train QDM. So, this
