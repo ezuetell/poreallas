@@ -24,13 +24,13 @@ def weighted_cdf(data, bins, weights):
     edges = np.concatenate([bins, [bins[-1] + np.diff(bins)[-1]]])
     counts, edges = np.histogram(data, bins=edges, density=False)
 
-    weighted = counts * weights * (31/counts.sum())
+    weighted = counts * weights
     cdf = np.cumsum(weighted)
 
     return bins, cdf
 
 def compute_cumulative_effect(forecast_local, reanalysis_local, region_filter, months, monthly = False, hotonly = False):
-    betas_mmt = xr.open_zarr(os.path.join(DATA_DIR, BETAS_PATH))
+    betas_mmt = xr.open_zarr(os.path.join(DATA_DIR, BETAS_PATH)).sel(sample = 7)
 
     cdf_data = {}
     max_cdf = 0
