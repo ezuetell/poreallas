@@ -213,7 +213,9 @@ def compute_stats(da, dim = 'number', polygon = None):
     return ds_out
 
 ###Output Functions ###
-def make_csv(effect, socioeconomics, polygon, baseline_period, ensemble = True, hotonly = "net", rate = False, age_weight = True):
+def make_csv(effect, socioeconomics, polygon, baseline_period, 
+             ensemble = True, 
+             hotonly = "net", rate = False, age_weight = True):
     rate_l = "rate" if rate else "total"
 
     #Compute Impact from Effect
