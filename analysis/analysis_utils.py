@@ -99,6 +99,8 @@ def compute_impact(
         by pop_weight_sum.
     """
 
+    valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
+
     if hotonly == "hotonly":
         # Hotonly
         _baseline = (
@@ -111,14 +113,14 @@ def compute_impact(
         if ensemble:
             _forecast = (
                 projected["/forecast_hotonly"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .groupby("time.month")
                 .mean()
             )
         else:
             _forecast = (
                 projected["/forecast_hotonly"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .mean(dim="number")
                 .groupby("time.month")
                 .mean()
@@ -135,14 +137,14 @@ def compute_impact(
         if ensemble:
             _forecast = (
                 projected["/forecast_coldonly"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .groupby("time.month")
                 .mean()
             )
         else:
             _forecast = (
                 projected["/forecast_coldonly"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .mean(dim="number")
                 .groupby("time.month")
                 .mean()
@@ -160,14 +162,14 @@ def compute_impact(
             # Maintain ensmble dimension
             _forecast = (
                 projected["/forecast"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .groupby("time.month")
                 .mean()
             )
         else:
             _forecast = (
                 projected["/forecast"]["effect"]
-                .chunk(chunks)
+                .chunk(valid_chunks)
                 .mean(dim="number")
                 .groupby("time.month")
                 .mean()
@@ -192,11 +194,11 @@ def compute_impact(
     )
     return regional_sum
 
-def compute_global_impact(impact, socioeconomics, rate=False):
+def compute_global_impact(impact, socioeconomics, rate, group_dim="region"):
     if rate:
         pop = socioeconomics["population"].sel(region=impact.region)
-        return (impact * pop).sum(dim="region") / pop.sum(dim="region")
-    return impact.sum(dim="region")
+        return (impact * pop).sum(dim=group_dim) / pop.sum(dim=group_dim)
+    return impact.sum(dim=group_dim)
 
 ### Analysis Functions ###
 
@@ -212,7 +214,7 @@ def xarray_to_gpd(data, polygons, crs="ESRI:54030"):
     return _polygons_data
 
 
-def compute_stats(da, dim="number", polygon=None):
+def compute_stats(da, dim="number", polygon=None, merge_key = "region"):
     """
     From an xarray, return statistics along dimension, 'dim'
 
@@ -249,7 +251,7 @@ def compute_stats(da, dim="number", polygon=None):
     if polygon is not None:
         _polygons_num = polygon.merge(
             ds_out.to_dataframe().reset_index(),
-            on="region",
+            on=merge_key,
         )
         return _polygons_num
     return ds_out
@@ -261,12 +263,31 @@ def dataset_to_dataframe(ds):
         return pd.DataFrame({k: [v.values.item()] for k, v in ds.data_vars.items()})
     return ds.to_dataframe().reset_index()
 
+def aggregate_by_iso(ds, polygon, operation="sum"):
+    iso_map = polygon["ISO"].reindex(ds["region"].values)
+    ds = ds.assign_coords(ISO=("region", iso_map.to_numpy(dtype=object)))
+
+    grouped = ds.groupby("ISO")
+    if operation == "sum":
+        ds = grouped.sum(dim="region")
+    elif operation == "mean":
+        ds = grouped.mean(dim="region")
+    else:
+        raise ValueError(f"Unsupported operation: {operation!r}")
+
+    polygon = polygon.copy()
+    polygon["geometry"] = polygon["geometry"].buffer(0)
+    polygon = polygon.dissolve(by="ISO", aggfunc="first")
+
+    return ds, polygon
+
 def make_csv(
     effect,
     socioeconomics,
     polygon,
     baseline_period,
     ensemble=True,
+    group_level = None,
     dims = ["number", "sample"],
     months = [8, 9, 10, 11, 12, 1],
     hotonly="net",
@@ -319,7 +340,7 @@ def make_csv(
 
     # Compute Impact from Effect
     impact = compute_impact(
-        effect,
+        effect.chunk({dim: -1 for dim in dims}),
         socioeconomics,
         ensemble=ensemble,
         baseline_period=baseline_period,
@@ -328,6 +349,14 @@ def make_csv(
         age_weight=age_weight,
     )
     impact = impact.sel(month = months)  # Only use first 6 months
+
+    if group_level is not None:  # Groupby ISO
+        if not rate:
+            impact, polygon = aggregate_by_iso(impact, polygon, operation="sum")
+            merge_key = "ISO"
+    else:
+        merge_key = "region"
+            
 
     ### Stats by Impact Region ###
     # Monthly Stats
@@ -344,9 +373,10 @@ def make_csv(
         "p90",
     ]
     if "regional_monthly" in output_scope:
-        _polygons_impact = compute_stats(impact, dim=dims, polygon=polygon)
+        _polygons_impact = compute_stats(impact, dim=dims, polygon=polygon, merge_key=merge_key)
         wide = _polygons_impact.pivot(
-            index=["region", "ISO"], columns="month", values=stat_cols
+            index=[merge_key] if merge_key == "ISO" else ["region", "ISO"], 
+            columns="month", values=stat_cols
         )
         wide.columns = [f"month {m} {stat}" for stat, m in wide.columns]
         stat_col_names = wide.columns.difference(["region", "ISO"])
@@ -358,49 +388,40 @@ def make_csv(
     if "regional_6mo" in output_scope:
         # 6-month stats
         mo6 = impact.sum(dim="month")
-        _polygons_mo6 = compute_stats(mo6, dim=dims, polygon=polygon)
+        _polygons_mo6 = compute_stats(mo6, dim=dims, polygon=polygon, merge_key=merge_key)
+        base_cols = ["ISO"] if merge_key == "ISO" else ["region", "ISO"]
         mo6_out = _polygons_mo6[
-            [
-                "region",
-                "ISO",
-                "median",
-                "p17",
-                "p83",
-                "likely_range_IPCC",
-                "mean",
-                "std",
-                "min",
-                "max",
-                "p10",
-                "p90",
+            base_cols + [
+                "median", "p17", "p83", "likely_range_IPCC",
+                "mean", "std", "min", "max", "p10", "p90",
             ]
         ]
-        stat_col_names = mo6_out.columns.difference(["region", "ISO"])
+        stat_col_names = mo6_out.columns.difference(base_cols)
         mo6_out[stat_col_names] = mo6_out[stat_col_names].round(0).astype("Int64")
         mo6_out.to_csv(
-        filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo", stat_scope=""),
-        index=False,
-)
+            filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo", stat_scope=""),
+            index=False,
+    )
     if "global_monthly" in output_scope or "global_6mo" in output_scope:
         ### Global Stats ###
-        global_impact = compute_global_impact(impact, socioeconomics, rate=rate)
+        global_impact = compute_global_impact(impact, socioeconomics, rate=rate, group_dim=merge_key)
 
         if "global_monthly" in output_scope:
             global_monthly = dataset_to_dataframe(compute_stats(global_impact, dim=dims))
             stat_col_names = global_monthly.columns.difference(["region", "ISO"])
             global_monthly[stat_col_names] = global_monthly[stat_col_names].round(0).astype("Int64")
             global_monthly.to_csv(
-            filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="global", stat_scope=""),
-            index=False,
-        )
+                filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="global", stat_scope=""),
+                index=False,
+            )
         if "global_6mo" in output_scope:
             global_mo6 = dataset_to_dataframe(compute_stats(global_impact.sum(dim="month"), dim=dims))
             stat_col_names = global_mo6.columns.difference(["region", "ISO"])
             global_mo6[stat_col_names] = global_mo6[stat_col_names].round(0).astype("Int64")
             global_mo6.to_csv(
-            filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo_global", stat_scope=""),
-            index=False,
-        )
+                filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo_global", stat_scope=""),
+                index=False,
+            )
     return
 
 
@@ -454,6 +475,11 @@ def _get_land_mask(lon_key, lat_key):
     )
     return regionmask.defined_regions.natural_earth_v5_0_0.land_110.mask(dummy)
 
+
+def compute_area_weighted_mean(ds, lat_name="lat", lon_name="lon"):
+    weights = np.cos(np.deg2rad(ds[lat_name]))
+    weights.name = "weights"
+    return ds.weighted(weights).mean((lat_name, lon_name))
 
 def land_only(da):
     da = da.rename({"longitude": "lon", "latitude": "lat"})
