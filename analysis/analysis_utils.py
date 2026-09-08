@@ -49,7 +49,7 @@ def pop_weight_sum(
             # Total Mortality
             _cohortstem = cohort[3:]
             _col = f"pop{_cohortstem}"
-            regional_sum = da.sel(age_cohort=cohort) * socioeconomics[_col]
+            regional_sum = da.sel(age_cohort=cohort)/100000 * socioeconomics[_col]
 
         regional_sum.name = f"{cohort}_impact" if impact else f"{cohort}_effect"
 
@@ -101,6 +101,10 @@ def compute_impact(
 
     valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
 
+    valid_terms = ["net", "hotonly", "coldonly"]
+    if hotonly not in valid_terms:
+        raise ValueError(f"Invalid term: {hotonly!r}. Must be one of {valid_terms}")
+
     if hotonly == "hotonly":
         # Hotonly
         _baseline = (
@@ -149,7 +153,7 @@ def compute_impact(
                 .groupby("time.month")
                 .mean()
             )
-    else:
+    elif hotonly == "net":
         ## Net
         _baseline = (
             projected["/baseline"]["effect"]
@@ -481,8 +485,8 @@ def compute_area_weighted_mean(ds, lat_name="lat", lon_name="lon"):
     weights.name = "weights"
     return ds.weighted(weights).mean((lat_name, lon_name))
 
-def land_only(da):
-    da = da.rename({"longitude": "lon", "latitude": "lat"})
+def land_only(da, lat_name="lat", lon_name="lon"):
+    da = da.rename({lon_name: "lon", lat_name: "lat"})
     mask = _get_land_mask(tuple(da.lon.values), tuple(da.lat.values))
     return da.where(mask.notnull() & (da.lat > -60))
 
@@ -613,6 +617,7 @@ def plot_single(
     cbar_label=None,
     vmin=None,
     vmax=None,
+    alpha = 1,
     edgecolor=None,
     linewidth=0,
     ax=None,
@@ -648,6 +653,7 @@ def plot_single(
         ax=ax,
         cmap=cmap,
         norm=norm,
+        alpha = alpha,
         edgecolor=edgecolor,
         linewidth=linewidth,
     )
