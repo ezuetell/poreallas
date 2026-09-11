@@ -5,6 +5,7 @@
 import xarray as xr
 import pandas as pd
 import geopandas as gpd
+import dask_geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -19,19 +20,20 @@ from cil_regionalization.config import SourceUnitPolicies
 from dataclasses import dataclass, field
 
 @dataclass
-class ImpactConfig:
+class ImpactConfig: # Class for impact computation
     version: str 
     baseline_period: slice
     socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
     polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
-    hotonly: str = "net"
-    rate: bool = False
-    age_weight: bool = True
+    hotonly: str = "net"             # "hotonly", "coldonly", or "net" 
+    rate: bool = False               # "False" = Total Deaths, "True" = Mortality Rate
+    age_weight: bool = True          # Age-cohort weighting
     cohort: str = "age65plus"
-    dims: list = field(default_factory=lambda: ["number", "sample"])
-    months: list = field(default_factory=lambda: [8, 9, 10, 11, 12, 1])
+    dims: list = field(default_factory=lambda: ["number", "sample"]) # Dims preserved for uncertainty
+    months: list = field(default_factory=lambda: [9, 10, 11, 12, 1, 2]) # Forecast Months (6-months)
 
     def __post_init__(self):
+        # Load Impact Region polygons and socioeconomics 
         if self.polygons is None or self.socioeconomics is None:
             load_dotenv()
             data_dir = os.environ["DATA_DIR"]
@@ -72,7 +74,7 @@ class ImpactConfig:
 
     def compute_impact(self, projected, chunks={"number": -1, "sample": -1, "region": "auto"}, ensemble=False):
         valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
-
+        # Check validity of "hotonly" item
         valid_terms = ["net", "hotonly", "coldonly"]
         if self.hotonly not in valid_terms:
             raise ValueError(f"Invalid term: {self.hotonly!r}. Must be one of {valid_terms}")
@@ -89,8 +91,9 @@ class ImpactConfig:
         if not ensemble:
             _forecast = _forecast.mean(dim="number")
         _forecast = _forecast.groupby("time.month").mean()
-
+        # Compute Impact (Forecast Effect - Baseline Effect)
         impact = _forecast - _baseline
+        # Save attributes
         impact.name = "impact"
         impact.attrs["long_name"] = "Temperature mortality impact"
         impact.attrs["units"] = "Deaths per 100,000 people" if self.rate else "Deaths"
@@ -165,43 +168,56 @@ def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
 
 ### Regionalization Functions ###
-def redistribute_adm1(impact, config, weights, chunk_size=5):
-    # Chunk along the ensemble dims only, keeping region/month whole per chunk
-    chunks = {dim: chunk_size for dim in config.dims}
-    impact = impact.chunk(chunks)
-
+def redistribute_adm1(impact, config, weights, chunk_size=1):
     value_name = impact.name or "value"
-    # Pull region labels directly from the coordinate — avoids a full-data compute
     col_regions = {(h,) for h in impact["region"].values}
+
+    # Total Deaths: "per_source", "kind = extensive"
+    # Death Rates: "per_destination", "kind = intensive"
     kind = "intensive" if config.rate else "extensive"
 
-    df = impact.to_dask_dataframe(dim_order=None).reset_index()
-    df = df.rename(columns={"region": "hierid", value_name: "value"})
+    results = []
+    numbers = impact["number"].values if "number" in impact.dims else [None]
+    # Process for each ensemble member individually
+    for start in range(0, len(numbers), chunk_size):
+        chunk = (
+            impact.isel(number=slice(start, start + chunk_size))
+            if "number" in impact.dims else impact
+        )
+        #xarray to dataframe
+        df_chunk = xarray_to_gpd(chunk, config.polygons)
+        df_chunk = df_chunk.rename(columns={"region": "hierid", value_name: "value"})
+        # keep only region, value, and dim columns
+        keep_cols = ["hierid", "value"] + list(config.dims)
+        if "month" in df_chunk.columns:
+            keep_cols.append("month")
+        df_chunk = df_chunk[keep_cols]
 
-    def _apply(partition):
-        if partition.empty:
-            return partition
-        return cilreg.apply_weights(
-            weights,
-            partition,
-            kind=kind,
-            weight="pop",
+        out = cilreg.apply_weights(
+            weights, # pre-computed from input file
+            df_chunk, 
+            kind=kind, 
+            weight="pop", 
             value_col="value",
             data_version="world-combo-201710",
-            restrict_to_sources=col_regions,
+            restrict_to_sources=col_regions, 
             allow_partial_coverage=True,
-            policies=SourceUnitPolicies(on_unmatched="skip", on_zero_weight="skip"),
+            policies=SourceUnitPolicies(
+                on_unmatched="skip", 
+                on_zero_weight="skip", # handle zero pop
+                on_absent_from_data="skip" #handel Antarctica ISO
+            ),
         ).frame
+        results.append(out)
+        del df_chunk, out  # free memory before next iteration
 
-    # Infer output schema from one partition, so dask knows the result shape
-    # without computing everything up front
-    sample = _apply(df.get_partition(0).compute())
-    meta = sample.iloc[0:0]
+    adm1 = pd.concat(results, ignore_index=True)
 
-    adm1 = df.map_partitions(_apply, meta=meta).compute()
+    index_cols = ["GID_0", "GID_1"] + list(config.dims)
+    if "month" in adm1.columns:
+        index_cols.append("month")
 
-    index_cols = [c for c in adm1.columns if c != "value"]
-    return adm1.set_index(index_cols).to_xarray()["value"]
+    return adm1.set_index(index_cols)["value"].to_xarray()
 
 def aggregate_by_iso(ds, polygon, operation="sum"):
     iso_map = polygon["ISO"].reindex(ds["region"].values)
@@ -209,8 +225,11 @@ def aggregate_by_iso(ds, polygon, operation="sum"):
 
     grouped = ds.groupby("ISO")
     if operation == "sum":
+        # Sum total deaths
         ds = grouped.sum(dim="region")
     elif operation == "mean":
+        # average temps 
+        # TODO: Make automatic 
         ds = grouped.mean(dim="region")
     else:
         raise ValueError(f"Unsupported operation: {operation!r}")
@@ -227,6 +246,7 @@ def aggregate_impact(impact, config, group_level):
 
     if group_level == "ISO":
         if config.rate:
+            # Pop-weighting total deaths required
             raise ValueError("ISO grouping is not supported when rate=True")
         impact, _ = aggregate_by_iso(impact, config.polygons, operation="sum")
         return impact, "ISO", ["ISO"]
@@ -259,10 +279,11 @@ def make_csv(
     impact = impact.sel(month=config.months)
 
     polygon = config.polygons
+    # Aggregate Impact Regions to group_level
     impact, merge_key, base_cols = aggregate_impact(impact, config, group_level)
 
     stat_cols = ["median", "p17", "p83", "likely_range_IPCC", "mean", "std", "min", "max", "p10", "p90"]
-
+    # Step through outputs listed in 'output_scope"
     if "regional_monthly" in output_scope:
         _polygons_impact = dataset_to_dataframe(compute_stats(impact, dim=config.dims))
         wide = _polygons_impact.pivot(
@@ -278,7 +299,7 @@ def make_csv(
                 version=config.version,
                 hotonly=config.hotonly,
                 rate_l=rate_l,
-                scope="all",
+                scope="monthly",
                 stat_scope="",
                 group_level=group_level,
             ),
@@ -305,6 +326,7 @@ def make_csv(
         )
 
     if "global_monthly" in output_scope or "global_6mo" in output_scope:
+        # Compute global total before getting stats
         global_impact = compute_global_impact(impact, config.socioeconomics, rate=config.rate, group_dim=merge_key)
 
         if "global_monthly" in output_scope:
