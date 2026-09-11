@@ -165,29 +165,40 @@ def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
 
 ### Regionalization Functions ###
-def redistribute_adm1(impact, config, weights, chunks=None):
-    if chunks is None:
-        chunks = {dim: "auto" for dim in config.dims}
+def redistribute_adm1(impact, config, weights, chunk_size=5):
+    # Chunk along the ensemble dims only, keeping region/month whole per chunk
+    chunks = {dim: chunk_size for dim in config.dims}
     impact = impact.chunk(chunks)
 
-    df = impact.to_dask_dataframe(dim_order=None).reset_index()
-    df = df.rename(columns={"region": "hierid"})
-
-    col_regions = {(h,) for h in df["hierid"].unique().compute()}
+    value_name = impact.name or "value"
+    # Pull region labels directly from the coordinate — avoids a full-data compute
+    col_regions = {(h,) for h in impact["region"].values}
     kind = "intensive" if config.rate else "extensive"
 
-    # If apply_weights requires pandas, materialize just before the call:
-    adm1 = cilreg.apply_weights(
-        weights,
-        df.compute(),  # drop this line if apply_weights accepts dask directly
-        kind=kind,
-        weight="pop",
-        value_col="value",
-        data_version="world-combo-201710",
-        restrict_to_sources=col_regions,
-        allow_partial_coverage=True,
-        policies=SourceUnitPolicies(on_unmatched="skip", on_zero_weight="skip"),
-    ).frame
+    df = impact.to_dask_dataframe(dim_order=None).reset_index()
+    df = df.rename(columns={"region": "hierid", value_name: "value"})
+
+    def _apply(partition):
+        if partition.empty:
+            return partition
+        return cilreg.apply_weights(
+            weights,
+            partition,
+            kind=kind,
+            weight="pop",
+            value_col="value",
+            data_version="world-combo-201710",
+            restrict_to_sources=col_regions,
+            allow_partial_coverage=True,
+            policies=SourceUnitPolicies(on_unmatched="skip", on_zero_weight="skip"),
+        ).frame
+
+    # Infer output schema from one partition, so dask knows the result shape
+    # without computing everything up front
+    sample = _apply(df.get_partition(0).compute())
+    meta = sample.iloc[0:0]
+
+    adm1 = df.map_partitions(_apply, meta=meta).compute()
 
     index_cols = [c for c in adm1.columns if c != "value"]
     return adm1.set_index(index_cols).to_xarray()["value"]
