@@ -9,6 +9,95 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
+import os
+from dotenv import load_dotenv
+
+import cil_regionalization as cilreg
+from cil_regionalization.config import SourceUnitPolicies
+
+
+from dataclasses import dataclass, field
+
+@dataclass
+class ImpactConfig:
+    version: str 
+    baseline_period: slice
+    socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
+    polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
+    hotonly: str = "net"
+    rate: bool = False
+    age_weight: bool = True
+    cohort: str = "age65plus"
+    dims: list = field(default_factory=lambda: ["number", "sample"])
+    months: list = field(default_factory=lambda: [8, 9, 10, 11, 12, 1])
+
+    def __post_init__(self):
+        if self.polygons is None or self.socioeconomics is None:
+            load_dotenv()
+            data_dir = os.environ["DATA_DIR"]
+
+        if self.polygons is None:
+            polygons_uri = os.environ["POREALLAS_REGIONS_POLYGONS_URI"]
+            self.polygons = (
+                gpd.read_parquet(os.path.join(data_dir, polygons_uri))
+                .rename(columns={"hierid": "region"})
+                .set_index("region")
+                .set_crs(epsg=4326)  # Assuming the data is WGS-84.
+            )
+
+        if self.socioeconomics is None:
+            socio_uri = os.environ["POREALLAS_SOCIOECONOMICS_URI"]
+            self.socioeconomics = xr.open_zarr(os.path.join(data_dir, socio_uri)).sel(year=2026)[
+                ["pop0to4", "pop5to64", "pop65plus", "pop", "gdppc", "iso3"]
+            ]
+
+    def _pop_weight_sum(self, da, impact=True):
+        if self.age_weight:
+            pop_weight = xr.concat(
+                [self.socioeconomics["pop0to4"], self.socioeconomics["pop5to64"], self.socioeconomics["pop65plus"]],
+                dim=pd.Index(["age0to4", "age5to64", "age65plus"], name="age_cohort"),
+            )
+            age_weighted_total = da * pop_weight / 100000
+            if self.rate:
+                age_weighted_total = age_weighted_total * 100000 / self.socioeconomics["pop"]
+            regional_sum = age_weighted_total.sum(dim="age_cohort")
+            regional_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
+        else:
+            regional_sum = da.sel(age_cohort=self.cohort)
+            if not self.rate:
+                _col = f"pop{self.cohort[3:]}"
+                regional_sum = da.sel(age_cohort=self.cohort) / 100000 * self.socioeconomics[_col]
+            regional_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
+        return regional_sum
+
+    def compute_impact(self, projected, chunks={"number": -1, "sample": -1, "region": "auto"}, ensemble=False):
+        valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
+
+        valid_terms = ["net", "hotonly", "coldonly"]
+        if self.hotonly not in valid_terms:
+            raise ValueError(f"Invalid term: {self.hotonly!r}. Must be one of {valid_terms}")
+
+        group = {"net": "", "hotonly": "_hotonly", "coldonly": "_coldonly"}[self.hotonly]
+        _baseline = (
+            projected[f"/baseline{group}"]["effect"]
+            .chunk({"region": "auto"})
+            .sel(time=self.baseline_period)
+            .groupby("time.month")
+            .mean()
+        )
+        _forecast = projected[f"/forecast{group}"]["effect"].chunk(valid_chunks)
+        if not ensemble:
+            _forecast = _forecast.mean(dim="number")
+        _forecast = _forecast.groupby("time.month").mean()
+
+        impact = _forecast - _baseline
+        impact.name = "impact"
+        impact.attrs["long_name"] = "Temperature mortality impact"
+        impact.attrs["units"] = "Deaths per 100,000 people" if self.rate else "Deaths"
+        impact.attrs["hotonly"] = self.hotonly
+
+        return self._pop_weight_sum(impact)
+
 
 def get_baseline_period(effect_xr, years=30):
     # Baseline
@@ -19,184 +108,6 @@ def get_baseline_period(effect_xr, years=30):
     return baseline_period
 
 
-def pop_weight_sum(
-    da, socioeconomics, rate=True, age_weight=True, cohort="age65plus", impact=True
-):
-    if age_weight:
-        # Weighted by cohort_population
-        pop_weight = xr.concat(
-            [
-                socioeconomics["pop0to4"],
-                socioeconomics["pop5to64"],
-                socioeconomics["pop65plus"],
-            ],
-            dim=pd.Index(["age0to4", "age5to64", "age65plus"], name="age_cohort"),
-        )
-        # Total Mortality = rate*pop/100,000
-        age_weighted_total = da * pop_weight / 100000
-
-        if rate:
-            # Mortality Rate = Total Age-Weighted Mortality/Total Pop (deaths/100k)
-            age_weighted_total = age_weighted_total * 100000 / socioeconomics["pop"]
-        # Sum across age cohorts for each Impact Region
-        regional_sum = age_weighted_total.sum(dim="age_cohort")
-        regional_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
-    else:
-        # Return individual cohort
-        regional_sum = da.sel(age_cohort=cohort)
-
-        if not rate:
-            # Total Mortality
-            _cohortstem = cohort[3:]
-            _col = f"pop{_cohortstem}"
-            regional_sum = da.sel(age_cohort=cohort)/100000 * socioeconomics[_col]
-
-        regional_sum.name = f"{cohort}_impact" if impact else f"{cohort}_effect"
-
-    return regional_sum
-
-
-def compute_impact(
-    projected,
-    socioeconomics,
-    baseline_period,
-    chunks={"number": -1, "sample": -1, "region": "auto"},
-    ensemble=False,
-    hotonly=False,
-    rate=False,
-    age_weight=True,
-    cohort="age65plus",
-):
-    """
-    Calculates the difference between forecast and baseline period mortality effects (deaths/100k or total deaths)
-    (monthly climatology), then applies population-weighted for age cohorts.
-
-    Parameters
-    ----------
-    projected : xarray.DataTree
-        Container with "/baseline", "/forecast", "/baseline_hotonly", and
-        "/forecast_hotonly" groups, each holding an "effect" DataArray.
-    socioeconomics : xarray.Dataset or DataArray
-        Population and demographic data used for weighting in pop_weight_sum.
-    baseline_period : slice or array-like
-        Time selector defining the baseline period to average over.
-    ensemble : bool, default False
-        If True, keep the ensemble ("number") dimension when computing the
-        forecast monthly climatology. If False, average over "number" first.
-    hotonly : bool, default False
-        If True, use the hot-only effect groups instead of the net effect groups.
-    rate : bool, default False
-        Passed to pop_weight_sum; if True, return mortality rates instead of population-weighted totals.
-    age_weight : bool, default True
-        Passed to pop_weight_sum; if True, apply age-based weighting.
-    cohort : str, default 'age65plus'
-        Age cohort to use if NOT weighting.
-
-    Returns
-    -------
-    xarray.DataArray or Dataset
-        Population-weighted regional sum (or rate) of the impact, as returned
-        by pop_weight_sum.
-    """
-
-    valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
-
-    valid_terms = ["net", "hotonly", "coldonly"]
-    if hotonly not in valid_terms:
-        raise ValueError(f"Invalid term: {hotonly!r}. Must be one of {valid_terms}")
-
-    if hotonly == "hotonly":
-        # Hotonly
-        _baseline = (
-            projected["/baseline_hotonly"]["effect"]
-            .chunk({"region": "auto"})
-            .sel(time=baseline_period)
-            .groupby("time.month")
-            .mean()
-        )
-        if ensemble:
-            _forecast = (
-                projected["/forecast_hotonly"]["effect"]
-                .chunk(valid_chunks)
-                .groupby("time.month")
-                .mean()
-            )
-        else:
-            _forecast = (
-                projected["/forecast_hotonly"]["effect"]
-                .chunk(valid_chunks)
-                .mean(dim="number")
-                .groupby("time.month")
-                .mean()
-            )
-    elif hotonly == "coldonly":
-        # Coldonly
-        _baseline = (
-            projected["/baseline_coldonly"]["effect"]
-            .chunk({"region": "auto"})
-            .sel(time=baseline_period)
-            .groupby("time.month")
-            .mean()
-        )
-        if ensemble:
-            _forecast = (
-                projected["/forecast_coldonly"]["effect"]
-                .chunk(valid_chunks)
-                .groupby("time.month")
-                .mean()
-            )
-        else:
-            _forecast = (
-                projected["/forecast_coldonly"]["effect"]
-                .chunk(valid_chunks)
-                .mean(dim="number")
-                .groupby("time.month")
-                .mean()
-            )
-    elif hotonly == "net":
-        ## Net
-        _baseline = (
-            projected["/baseline"]["effect"]
-            .chunk({"region": "auto"})
-            .sel(time=baseline_period)
-            .groupby("time.month")
-            .mean()
-        )
-        if ensemble:
-            # Maintain ensmble dimension
-            _forecast = (
-                projected["/forecast"]["effect"]
-                .chunk(valid_chunks)
-                .groupby("time.month")
-                .mean()
-            )
-        else:
-            _forecast = (
-                projected["/forecast"]["effect"]
-                .chunk(valid_chunks)
-                .mean(dim="number")
-                .groupby("time.month")
-                .mean()
-            )
-
-    # Compute Impact
-    impact = _forecast - _baseline
-    # Add metadata
-    impact.name = "impact"
-    impact.attrs["long_name"] = "Temperature mortality impact"
-    impact.attrs["units"] = "Deaths per 100,000 people" if rate else "Deaths"
-    impact.attrs["hotonly"] = hotonly
-
-    # Apply population weighting
-    regional_sum = pop_weight_sum(
-        impact,
-        socioeconomics,
-        rate=rate,
-        age_weight=age_weight,
-        cohort=cohort,
-        impact=True,
-    )
-    return regional_sum
 
 def compute_global_impact(impact, socioeconomics, rate, group_dim="region"):
     if rate:
@@ -218,13 +129,10 @@ def xarray_to_gpd(data, polygons, crs="ESRI:54030"):
     return _polygons_data
 
 
-def compute_stats(da, dim="number", polygon=None, merge_key = "region"):
+def compute_stats(da, dim="number"):
     """
-    From an xarray, return statistics along dimension, 'dim'
-
-    Return an xarray or optionally return a geodataframe (if polygon gdf is passed)
+    From an xarray, return statistics along dimension, 'dim' as an xr.Dataset.
     """
-
     mean = da.mean(dim=dim)
     std = da.std(dim=dim)
     min = da.min(dim=dim)
@@ -238,7 +146,7 @@ def compute_stats(da, dim="number", polygon=None, merge_key = "region"):
     p90 = p.sel(quantile=0.90, drop=True)
     likely_range = p83 - p17
 
-    ds_out = xr.Dataset(
+    return xr.Dataset(
         {
             "median": p50,
             "p17": p17,
@@ -252,20 +160,37 @@ def compute_stats(da, dim="number", polygon=None, merge_key = "region"):
             "p90": p90,
         }
     )
-    if polygon is not None:
-        _polygons_num = polygon.merge(
-            ds_out.to_dataframe().reset_index(),
-            on=merge_key,
-        )
-        return _polygons_num
-    return ds_out
+def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
+    """Merge a stats Dataset onto a polygon GeoDataFrame on merge_key."""
+    return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
 
+### Regionalization Functions ###
+def redistribute_adm1(impact, config, weights):
+    """
+    Population-weighted redistribution of the full ensemble to ADM1,
+    letting apply_weights treat `number`/`sample` (and `month`, if present)
+    as passthrough dimensions it aggregates independently per combination.
+    """
+    df = impact.to_dataframe(name="value").reset_index()
+    df = df.rename(columns={"region": "hierid"})
 
-###Output Functions ###
-def dataset_to_dataframe(ds):
-    if len(ds.dims) == 0:
-        return pd.DataFrame({k: [v.values.item()] for k, v in ds.data_vars.items()})
-    return ds.to_dataframe().reset_index()
+    col_regions = {(h,) for h in df["hierid"].unique()}
+    kind = "intensive" if config.rate else "extensive"
+
+    adm1 = cilreg.apply_weights(
+        weights,
+        df,
+        kind=kind,
+        weight="pop",
+        value_col="value",
+        data_version="world-combo-201710",
+        restrict_to_sources=col_regions,
+        allow_partial_coverage=True,
+        policies=SourceUnitPolicies(on_unmatched="skip", on_zero_weight="skip"),
+    ).frame
+
+    index_cols = [c for c in adm1.columns if c != "value"]
+    return adm1.set_index(index_cols).to_xarray()["value"]
 
 def aggregate_by_iso(ds, polygon, operation="sum"):
     iso_map = polygon["ISO"].reindex(ds["region"].values)
@@ -285,148 +210,126 @@ def aggregate_by_iso(ds, polygon, operation="sum"):
 
     return ds, polygon
 
+def aggregate_impact(impact, config, group_level):
+    if group_level == "IR":
+        return impact, "region"
+
+    if group_level == "ISO":
+        if config.rate:
+            raise ValueError("ISO grouping is not supported when rate=True")
+        impact, _ = aggregate_by_iso(impact, config.polygons, operation="sum")
+        return impact, "ISO"
+
+    if group_level == "ADM1":
+        weights = cilreg.fetch_weights(
+            "gadm41-adm1-per-destination" if config.rate else "gadm41-adm1-per-source"
+        )
+        impact = redistribute_adm1(impact, config, weights)
+        return impact, "GID_1"
+
+    raise ValueError(f"Unsupported group_level: {group_level!r}")
+
+###Output Functions ###
+def dataset_to_dataframe(ds):
+    if len(ds.dims) == 0:
+        return pd.DataFrame({k: [v.values.item()] for k, v in ds.data_vars.items()})
+    return ds.to_dataframe().reset_index()
+
 def make_csv(
     effect,
-    socioeconomics,
-    polygon,
-    baseline_period,
-    ensemble=True,
-    group_level = None,
-    dims = ["number", "sample"],
-    months = [8, 9, 10, 11, 12, 1],
-    hotonly="net",
-    rate=False,
-    age_weight=True,
-    filename_template="2608_{hotonly}_{scope}_{rate_l}_{stat_scope}stats.csv",
-    output_scope = ["regional_monthly", "regional_6mo", "global_monthly", "global_6mo"],
+    config: ImpactConfig,
+    group_level="IR",
+    filename_template="{version}_{hotonly}_{scope}_{rate_l}_{stat_scope}_{group_level}.csv",
+    output_scope=["regional_monthly", "regional_6mo", "global_monthly", "global_6mo"],
 ):
-    """
-    Compute regional and global impact stats from an effects datatree and
-    write them out as CSVs.
+    rate_l = "rate" if config.rate else "total"
 
-    Computes impact from `effect`, then generates monthly, 6-month, and
-    global summary statistics (region-level via `polygon`, global via
-    population-weighted averaging when `rate=True` or summation when
-    `rate=False`). All stats are rounded to the nearest integer before
-    being written to CSV.
+    impact = config.compute_impact(effect.chunk({dim: -1 for dim in config.dims}), ensemble=True)
+    impact = impact.sel(month=config.months)
 
-    Parameters
-    ----------
-    effect : xr.DataArray or xr.Dataset
-        Effect data used to compute impact.
-    socioeconomics : xr.Dataset
-        Socioeconomic data, including population, used for impact
-        computation and population-weighted global rates.
-    polygon : GeoDataFrame or similar
-        Impact region polygons used to group regional stats.
-    baseline_period : tuple or list
-        Start/end period defining the baseline for impact computation.
-    ensemble : bool, default True
-        Whether to compute impact across an ensemble of runs or return ensemble mean.
-    hotonly : str, default "net"
-        Filter for hot-only effects; used in output filenames.
-    rate : bool, default False
-        If True, compute population-weighted rates instead of totals.
-    age_weight : bool, default True
-        Whether to apply age weighting in the impact computation.
-    filename_template : str, optional
-        Template string for output filenames. Supports the placeholders
-        {hotonly}, {scope}, {rate_l}, and {stat_scope}.
-
-    Returns
-    -------
-    None
-        Writes regional monthly, regional 6-month, global monthly, and
-        global 6-month stats CSVs to disk.
-    """
-
-    rate_l = "rate" if rate else "total"
-
-    # Compute Impact from Effect
-    impact = compute_impact(
-        effect.chunk({dim: -1 for dim in dims}),
-        socioeconomics,
-        ensemble=ensemble,
-        baseline_period=baseline_period,
-        hotonly=hotonly,
-        rate=rate,
-        age_weight=age_weight,
-    )
-    impact = impact.sel(month = months)  # Only use first 6 months
-
-    if group_level is not None:  # Groupby ISO
-        if not rate:
-            impact, polygon = aggregate_by_iso(impact, polygon, operation="sum")
-            merge_key = "ISO"
-    else:
+    polygon = config.polygons
+    if group_level == "ISO" and not config.rate:
+        impact, polygon = aggregate_by_iso(impact, config.polygons, operation="sum")
+        merge_key = "ISO"
+    elif group_level == "IR":
         merge_key = "region"
-            
 
-    ### Stats by Impact Region ###
-    # Monthly Stats
-    stat_cols = [
-        "median",
-        "p17",
-        "p83",
-        "likely_range_IPCC",
-        "mean",
-        "std",
-        "min",
-        "max",
-        "p10",
-        "p90",
-    ]
+    stat_cols = ["median", "p17", "p83", "likely_range_IPCC", "mean", "std", "min", "max", "p10", "p90"]
+
     if "regional_monthly" in output_scope:
-        _polygons_impact = compute_stats(impact, dim=dims, polygon=polygon, merge_key=merge_key)
+        _polygons_impact = dataset_to_dataframe(compute_stats(impact, dim=config.dims))
         wide = _polygons_impact.pivot(
-            index=[merge_key] if merge_key == "ISO" else ["region", "ISO"], 
-            columns="month", values=stat_cols
+            index=[merge_key] if merge_key == "ISO" else ["region", "ISO"],
+            columns="month", values=stat_cols,
         )
         wide.columns = [f"month {m} {stat}" for stat, m in wide.columns]
         stat_col_names = wide.columns.difference(["region", "ISO"])
         wide[stat_col_names] = wide[stat_col_names].round(0).astype("Int64")
         wide = wide.reset_index()
         wide.to_csv(
-        filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="all", stat_scope=""),
-        index=False,)
+            filename_template.format(
+                version=config.version,
+                hotonly=config.hotonly,
+                rate_l=rate_l,
+                scope="all",
+                stat_scope="",
+                group_level=group_level,
+            ),
+            index=False,
+        )
+
     if "regional_6mo" in output_scope:
-        # 6-month stats
         mo6 = impact.sum(dim="month")
-        _polygons_mo6 = compute_stats(mo6, dim=dims, polygon=polygon, merge_key=merge_key)
+        _polygons_mo6 = dataset_to_dataframe(compute_stats(mo6, dim=config.dims))
         base_cols = ["ISO"] if merge_key == "ISO" else ["region", "ISO"]
-        mo6_out = _polygons_mo6[
-            base_cols + [
-                "median", "p17", "p83", "likely_range_IPCC",
-                "mean", "std", "min", "max", "p10", "p90",
-            ]
-        ]
+        mo6_out = _polygons_mo6[base_cols + stat_cols]
         stat_col_names = mo6_out.columns.difference(base_cols)
         mo6_out[stat_col_names] = mo6_out[stat_col_names].round(0).astype("Int64")
         mo6_out.to_csv(
-            filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo", stat_scope=""),
+            filename_template.format(
+                version=config.version,
+                hotonly=config.hotonly,
+                rate_l=rate_l,
+                scope="6mo",
+                stat_scope="",
+                group_level=group_level,
+            ),
             index=False,
-    )
+        )
+
     if "global_monthly" in output_scope or "global_6mo" in output_scope:
-        ### Global Stats ###
-        global_impact = compute_global_impact(impact, socioeconomics, rate=rate, group_dim=merge_key)
+        global_impact = compute_global_impact(impact, config.socioeconomics, rate=config.rate, group_dim=merge_key)
 
         if "global_monthly" in output_scope:
-            global_monthly = dataset_to_dataframe(compute_stats(global_impact, dim=dims))
+            global_monthly = dataset_to_dataframe(compute_stats(global_impact, dim=config.dims))
             stat_col_names = global_monthly.columns.difference(["region", "ISO"])
             global_monthly[stat_col_names] = global_monthly[stat_col_names].round(0).astype("Int64")
             global_monthly.to_csv(
-                filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="global", stat_scope=""),
+                filename_template.format(
+                    version=config.version,
+                    hotonly=config.hotonly,
+                    rate_l=rate_l,
+                    scope="monthly_global",
+                    stat_scope="",
+                    group_level=group_level,
+                ),
                 index=False,
             )
         if "global_6mo" in output_scope:
-            global_mo6 = dataset_to_dataframe(compute_stats(global_impact.sum(dim="month"), dim=dims))
+            global_mo6 = dataset_to_dataframe(compute_stats(global_impact.sum(dim="month"), dim=config.dims))
             stat_col_names = global_mo6.columns.difference(["region", "ISO"])
             global_mo6[stat_col_names] = global_mo6[stat_col_names].round(0).astype("Int64")
             global_mo6.to_csv(
-                filename_template.format(hotonly=hotonly, rate_l=rate_l, scope="6mo_global", stat_scope=""),
+            filename_template.format(
+                version=config.version,
+                hotonly=config.hotonly,
+                rate_l=rate_l,
+                scope="6mo_global",
+                stat_scope="",
+                group_level=group_level,
+            ),
                 index=False,
             )
-    return
 
 
 def build_stats_text(da, dim=None, fmt="{:.2f}"):
