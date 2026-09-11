@@ -165,21 +165,21 @@ def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
 
 ### Regionalization Functions ###
-def redistribute_adm1(impact, config, weights):
-    """
-    Population-weighted redistribution of the full ensemble to ADM1,
-    letting apply_weights treat `number`/`sample` (and `month`, if present)
-    as passthrough dimensions it aggregates independently per combination.
-    """
-    df = impact.to_dataframe(name="value").reset_index()
+def redistribute_adm1(impact, config, weights, chunks=None):
+    if chunks is None:
+        chunks = {dim: "auto" for dim in config.dims}
+    impact = impact.chunk(chunks)
+
+    df = impact.to_dask_dataframe(dim_order=None).reset_index()
     df = df.rename(columns={"region": "hierid"})
 
-    col_regions = {(h,) for h in df["hierid"].unique()}
+    col_regions = {(h,) for h in df["hierid"].unique().compute()}
     kind = "intensive" if config.rate else "extensive"
 
+    # If apply_weights requires pandas, materialize just before the call:
     adm1 = cilreg.apply_weights(
         weights,
-        df,
+        df.compute(),  # drop this line if apply_weights accepts dask directly
         kind=kind,
         weight="pop",
         value_col="value",
@@ -212,20 +212,20 @@ def aggregate_by_iso(ds, polygon, operation="sum"):
 
 def aggregate_impact(impact, config, group_level):
     if group_level == "IR":
-        return impact, "region"
+        return impact, "region", ["region", "ISO"]
 
     if group_level == "ISO":
         if config.rate:
             raise ValueError("ISO grouping is not supported when rate=True")
         impact, _ = aggregate_by_iso(impact, config.polygons, operation="sum")
-        return impact, "ISO"
+        return impact, "ISO", ["ISO"]
 
     if group_level == "ADM1":
         weights = cilreg.fetch_weights(
             "gadm41-adm1-per-destination" if config.rate else "gadm41-adm1-per-source"
         )
         impact = redistribute_adm1(impact, config, weights)
-        return impact, "GID_1"
+        return impact, "GID_1", ["GID_0", "GID_1"]
 
     raise ValueError(f"Unsupported group_level: {group_level!r}")
 
@@ -248,22 +248,18 @@ def make_csv(
     impact = impact.sel(month=config.months)
 
     polygon = config.polygons
-    if group_level == "ISO" and not config.rate:
-        impact, polygon = aggregate_by_iso(impact, config.polygons, operation="sum")
-        merge_key = "ISO"
-    elif group_level == "IR":
-        merge_key = "region"
+    impact, merge_key, base_cols = aggregate_impact(impact, config, group_level)
 
     stat_cols = ["median", "p17", "p83", "likely_range_IPCC", "mean", "std", "min", "max", "p10", "p90"]
 
     if "regional_monthly" in output_scope:
         _polygons_impact = dataset_to_dataframe(compute_stats(impact, dim=config.dims))
         wide = _polygons_impact.pivot(
-            index=[merge_key] if merge_key == "ISO" else ["region", "ISO"],
+            index=base_cols,
             columns="month", values=stat_cols,
         )
         wide.columns = [f"month {m} {stat}" for stat, m in wide.columns]
-        stat_col_names = wide.columns.difference(["region", "ISO"])
+        stat_col_names = wide.columns.difference(base_cols)
         wide[stat_col_names] = wide[stat_col_names].round(0).astype("Int64")
         wide = wide.reset_index()
         wide.to_csv(
