@@ -49,7 +49,7 @@ class ImpactConfig: # Class for impact computation
             self.socioeconomics = xr.open_zarr(self.socioeconomics_path).sel(year=2026)[
                 ["pop0to4", "pop5to64", "pop65plus", "pop", "gdppc", "iso3"]
             ]
-## TODO Move these functions outside of class
+## TODO Move these functions outside of class    
     def _pop_weight_sum(self, da, impact=True): # TODO two functions: rate and total
         """
         Parameters
@@ -68,32 +68,43 @@ class ImpactConfig: # Class for impact computation
             Population-weighted mortality total or rate, named according to
             `impact` and the weighting strategy used.
         """
-        # Age-Weight: weight effect by population cohort share
+        def _pop_weight_total():
+            if self.age_weight:
+                # Age Weight = Mortality Rate * Pop Share * Total Pop/100k
+                age_weighted_total = da * pop_weight * total_pop / 100000
+                # Sum over age_cohort for each region (sum(pop_weight = 1))
+                age_sum = age_weighted_total.sum(dim="age_cohort")
+                age_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
+            else:
+                cohort_rate = da.sel(age_cohort=self.cohort)
+                # Population of specified age cohort
+                pop_col = f"pop{self.cohort[3:]}"
+                #Total deaths = rate*pop/100k
+                age_sum = cohort_rate * self.socioeconomics[pop_col] / 100000
+                age_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
+            return age_sum
+
+        def _pop_weight_rate():
+            if self.age_weight:
+                #Age-weighted rate = sum(rate * popshare)
+                age_weighted_rate = da * pop_weight
+                age_sum = age_weighted_rate.sum(dim="age_cohort")
+                age_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
+            else:
+                # Return selected age_cohort
+                age_sum = da.sel(age_cohort=self.cohort)
+                age_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
+            return age_sum
+
         if self.age_weight:
-            # Construct pop-weight xarray from age-cohorts
+            total_pop = self.socioeconomics["pop"]
+            # Comput pop share (cohort_pop/total_pop)
             pop_weight = xr.concat(
                 [self.socioeconomics["pop0to4"], self.socioeconomics["pop5to64"], self.socioeconomics["pop65plus"]],
                 dim=pd.Index(["age0to4", "age5to64", "age65plus"], name="age_cohort"),
-            )
-            #age-weighted total (deaths) = effect (deaths/100k) * popshare/100K (100k population)
-            age_weighted_total = da * pop_weight / 100000
+            ) / total_pop
 
-            if self.rate:
-                # Mortality Rate
-                # mortality_rate = effect * pop (age-cohort)/total pop
-                age_weighted_total = age_weighted_total * 100000 / self.socioeconomics["pop"]
-            age_sum = age_weighted_total.sum(dim="age_cohort")
-            # Name variable based on impact flag
-            age_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
-        else:
-            #Select a single age-cohort
-            age_sum = da.sel(age_cohort=self.cohort) # Age-cohort mortality rate
-            if not self.rate:
-                #Total deaths
-                _col = f"pop{self.cohort[3:]}" # Find population of age-cohort
-                age_sum = da / 100000 * self.socioeconomics[_col]
-            age_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
-        return age_sum
+        return _pop_weight_rate() if self.rate else _pop_weight_total()
 
     def compute_impact(self, projected, chunks={"number": -1, "sample": -1, "region": "auto"}, ensemble=False):
         """
