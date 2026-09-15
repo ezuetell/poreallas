@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 class ImpactConfig: # Class for impact computation
     version: str 
     baseline_period: slice
+    polygons_path: str = None         # path to polygons parquet file
+    socioeconomics_path: str = None   # path to socioeconomics zarr store
     socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
     polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
     dims: list = None # Dims preserved for uncertainty
@@ -34,23 +36,16 @@ class ImpactConfig: # Class for impact computation
 
 
     def __post_init__(self):
-        # Load Impact Region polygons and socioeconomics 
-        if self.polygons is None or self.socioeconomics is None:
-            load_dotenv()
-            data_dir = os.environ["DATA_DIR"]
-
         if self.polygons is None:
-            polygons_uri = os.environ["POREALLAS_REGIONS_POLYGONS_URI"]
             self.polygons = (
-                gpd.read_parquet(os.path.join(data_dir, polygons_uri))
+                gpd.read_parquet(self.polygons_path)
                 .rename(columns={"hierid": "region"})
                 .set_index("region")
                 .set_crs(epsg=4326)  # Assuming the data is WGS-84.
             )
 
         if self.socioeconomics is None:
-            socio_uri = os.environ["POREALLAS_SOCIOECONOMICS_URI"]
-            self.socioeconomics = xr.open_zarr(os.path.join(data_dir, socio_uri)).sel(year=2026)[
+            self.socioeconomics = xr.open_zarr(self.socioeconomics_path).sel(year=2026)[
                 ["pop0to4", "pop5to64", "pop65plus", "pop", "gdppc", "iso3"]
             ]
 ## TODO Move these functions outside of class
