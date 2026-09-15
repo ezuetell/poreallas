@@ -28,8 +28,8 @@ class ImpactConfig: # Class for impact computation
     regions_path: str = None          # segment weights
     socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
     polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
-    dims: list = None # Dims preserved for uncertainty
-    months: list = None # Forecast Months (6-months) #### todo get rid of defaults
+    dims: list = None               # Dims preserved for uncertainty
+    months: list = None             # Forecast Months (6-months) #### todo get rid of defaults
     hotonly: str = "net"             # "hotonly", "coldonly", or "net" 
     rate: bool = False               # "False" = Total Deaths, "True" = Mortality Rate
     age_weight: bool = True          # Age-cohort weighting
