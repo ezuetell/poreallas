@@ -25,6 +25,7 @@ class ImpactConfig: # Class for impact computation
     baseline_period: slice
     polygons_path: str = None         # path to polygons parquet file
     socioeconomics_path: str = None   # path to socioeconomics zarr store
+    regions_path: str = None          # segment weights
     socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
     polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
     dims: list = None # Dims preserved for uncertainty
@@ -50,6 +51,23 @@ class ImpactConfig: # Class for impact computation
             ]
 ## TODO Move these functions outside of class
     def _pop_weight_sum(self, da, impact=True): # TODO two functions: rate and total
+        """
+        Parameters
+        ----------
+        da : xr.DataArray
+            Mortality effect array (deaths per 100,000) with an 'age_cohort'
+            dimension when self.age_weight is False.
+        impact : bool, default True
+            If True, names the output "*_impact"; if False, names it "*_effect".
+            Distinguishes a computed impact (relative to baseline) from a raw
+            effect value.
+
+        Returns
+        -------
+        xr.DataArray
+            Population-weighted mortality total or rate, named according to
+            `impact` and the weighting strategy used.
+        """
         # Age-Weight: weight effect by population cohort share
         if self.age_weight:
             # Construct pop-weight xarray from age-cohorts
@@ -64,20 +82,45 @@ class ImpactConfig: # Class for impact computation
                 # Mortality Rate
                 # mortality_rate = effect * pop (age-cohort)/total pop
                 age_weighted_total = age_weighted_total * 100000 / self.socioeconomics["pop"]
-            regional_sum = age_weighted_total.sum(dim="age_cohort")
+            age_sum = age_weighted_total.sum(dim="age_cohort")
             # Name variable based on impact flag
-            regional_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
+            age_sum.name = "age_weighted_impact" if impact else "age_weighted_effect"
         else:
             #Select a single age-cohort
-            regional_sum = da.sel(age_cohort=self.cohort) # Age-cohort mortality rate
+            age_sum = da.sel(age_cohort=self.cohort) # Age-cohort mortality rate
             if not self.rate:
                 #Total deaths
                 _col = f"pop{self.cohort[3:]}" # Find population of age-cohort
-                regional_sum = da / 100000 * self.socioeconomics[_col]
-            regional_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
-        return regional_sum
+                age_sum = da / 100000 * self.socioeconomics[_col]
+            age_sum.name = f"{self.cohort}_impact" if impact else f"{self.cohort}_effect"
+        return age_sum
 
     def compute_impact(self, projected, chunks={"number": -1, "sample": -1, "region": "auto"}, ensemble=False):
+        """
+        Parameters
+        ----------
+        projected : xarray.DataTree
+            Datatree with "/baseline", "/forecast", and their "_hotonly"/
+            "_coldonly" leaves, each holding an "effect" DataArray (deaths/100k) with
+            a "time" dimension.
+        chunks : dict, default {"number": -1, "sample": -1, "region": "auto"}
+            Chunk sizes applied to the forecast effect array.
+        ensemble : bool, default False
+            If True, keep the "number" (ensemble) dimension in the forecast
+            climatology. If False, average over "number" before computing
+            impact.
+
+        Returns
+        -------
+        xr.DataArray
+            Population-weighted impact, as returned by self._pop_weight_sum.
+
+        Raises
+        ------
+        ValueError
+            If self.hotonly is not one of "net", "hotonly", or "coldonly".
+        """
+        # Check for valid chunks based on dims present
         valid_chunks = {k: v for k, v in chunks.items() if k in projected["/forecast_hotonly"]["effect"].dims}
         # Check validity of "hotonly" item
         valid_terms = ["net", "hotonly", "coldonly"]
@@ -180,18 +223,23 @@ def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
 
 ### Regionalization Functions ###
-def redistribute_adm1(impact, config, weights, chunk_size=8):
+def redistribute_adm1(impact, config, chunk_size=4):
     value_name = impact.name or "value"
+    # List of impact regions
     col_regions = {(h,) for h in impact["region"].values}
 
     # Total Deaths: "per_source", "kind = extensive"
     # Death Rates: "per_destination", "kind = intensive"
     kind = "intensive" if config.rate else "extensive"
-
+    # Get weights from pre-defined files
+    weights = cilreg.fetch_weights(
+        "gadm41-adm1-per-destination" if config.rate else "gadm41-adm1-per-source"
+    )
+    # store chunked results
     results = []
     # Check for ensemble members
     numbers = impact["number"].values if "number" in impact.dims else [None]
-    # Process for each ensemble member individually
+    # Process for each ensemble member chunk to manage memory (Other option could be dask-pandas)
     for start in range(0, len(numbers), chunk_size):
         chunk = (
             impact.isel(number=slice(start, start + chunk_size))
@@ -278,15 +326,7 @@ def aggregate_impact(impact, config, group_level): #Needs validation
         return impact, "ISO", ["ISO"]
 
     if group_level == "ADM1":
-        # Get weights from pre-defined files
-        weights = cilreg.fetch_weights(
-            "gadm41-adm1-per-destination" if config.rate else "gadm41-adm1-per-source"
-        )
-        impact = redistribute_adm1(impact, config, weights)
-        # Add ISO (from shapefile gpd) to xarray to match data across spatial resolutions
-        # align ISO and Impact region dataframes
-        #iso_map = config.polygons["ISO"].reindex(impact["region"].values)
-        #impact = impact.assign_coords(ISO=("region", iso_map.to_numpy(dtype=object)))
+        impact = redistribute_adm1(impact, config)
         return impact, "GID_1", ["GID_0", "GID_1"]
 
     raise ValueError(f"Unsupported group_level: {group_level!r}")
