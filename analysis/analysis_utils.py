@@ -352,7 +352,6 @@ def make_csv(
     if "regional_6mo" in output_scope:
         mo6 = impact.sum(dim="month")
         _polygons_mo6 = dataset_to_dataframe(compute_stats(mo6, dim=config.dims))
-        base_cols = ["ISO"] if merge_key == "ISO" else ["region", "ISO"]
         mo6_out = _polygons_mo6[base_cols + stat_cols]
         stat_col_names = mo6_out.columns.difference(base_cols)
         mo6_out[stat_col_names] = mo6_out[stat_col_names].round(0).astype("Int64")
