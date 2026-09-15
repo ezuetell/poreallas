@@ -25,12 +25,13 @@ class ImpactConfig: # Class for impact computation
     baseline_period: slice
     socioeconomics: object = None    # xr.Dataset; loaded in __post_init__ if None
     polygons: object = None          # geopandas.GeoDataFrame; loaded in __post_init__ if None
+    dims: list = None # Dims preserved for uncertainty
+    months: list = None # Forecast Months (6-months) #### todo get rid of defaults
     hotonly: str = "net"             # "hotonly", "coldonly", or "net" 
     rate: bool = False               # "False" = Total Deaths, "True" = Mortality Rate
     age_weight: bool = True          # Age-cohort weighting
     cohort: str = "age65plus"
-    dims: list = field(default_factory=lambda: ["number", "sample"]) # Dims preserved for uncertainty
-    months: list = field(default_factory=lambda: [9, 10, 11, 12, 1, 2]) # Forecast Months (6-months) #### todo get rid of defaults
+
 
     def __post_init__(self):
         # Load Impact Region polygons and socioeconomics 
