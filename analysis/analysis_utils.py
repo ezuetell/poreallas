@@ -41,7 +41,7 @@ class ImpactConfig: # Class for impact computation
 
 
     def __post_init__(self):
-        if self.polygons is None:
+        if self.polygons is None: # Load polygons gpd
             self.polygons = (
                 gpd.read_parquet(self.polygons_path)
                 .rename(columns={"hierid": "region"})
@@ -49,7 +49,7 @@ class ImpactConfig: # Class for impact computation
                 .set_crs(epsg=4326)  # Assuming the data is WGS-84.
             )
 
-        if self.socioeconomics is None:
+        if self.socioeconomics is None: # Load socioeconomics xarray 
             self.socioeconomics = xr.open_zarr(self.socioeconomics_path).sel(year=2026)[
                 ["pop0to4", "pop5to64", "pop65plus", "pop", "gdppc", "iso3"]
             ]
@@ -199,8 +199,12 @@ def get_baseline_period(effect_xr, years=30):
 def compute_global_impact(impact, socioeconomics, rate, group_dim="region"):
     #Compute the global impact region by summing across spatial "group_dim"
     if rate:
-        #Pop-weight each region
-        pop = socioeconomics["population"].sel(region=impact.region)
+        if group_dim == 'region':
+            #Pop-weight each region
+            pop = socioeconomics["population"].sel(region=impact.region)
+        else:
+            raise ValueError("Pop-Weighting only available for region group")
+            # TODO Aggregate population to other group levels
         return (impact * pop).sum(dim=group_dim) / pop.sum(dim=group_dim)
     return impact.sum(dim=group_dim)
 
@@ -248,6 +252,7 @@ def compute_stats(da, dim="number"):
             "p90": p90,
         }
     )
+
 def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     """Merge a stats Dataset onto a polygon GeoDataFrame on merge_key."""
     return polygon.merge(stats_ds.to_dataframe().reset_index(), on=merge_key)
@@ -569,11 +574,13 @@ def _get_land_mask(lon_key, lat_key):
 
 
 def compute_area_weighted_mean(ds, lat_name="lat", lon_name="lon"):
+    # Compute area weighted-mean of gridded data
     weights = np.cos(np.deg2rad(ds[lat_name]))
     weights.name = "weights"
     return ds.weighted(weights).mean((lat_name, lon_name))
 
 def land_only(da, lat_name="lat", lon_name="lon"):
+    # Clip gridded data to land mask
     da = da.rename({lon_name: "lon", lat_name: "lat"})
     mask = _get_land_mask(tuple(da.lon.values), tuple(da.lat.values))
     return da.where(mask.notnull() & (da.lat > -60))
