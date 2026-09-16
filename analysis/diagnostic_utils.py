@@ -7,13 +7,11 @@ import xarray as xr
 
 load_dotenv()
 
-DATA_DIR = os.environ["DATA_DIR"]
 TAS_FORECAST_URI = os.environ["POREALLAS_TAS_FORECAST_URI"]
 ERA5_URI = os.environ["POREALLAS_ERA5_URI"]
 GAMMA_URI = os.environ["POREALLAS_GAMMA_URI"]
 SOCIOECONOMICS_URI = os.environ["POREALLAS_SOCIOECONOMICS_URI"]
 REGIONS_URI = os.environ["POREALLAS_REGIONS_URI"]
-BETAS_PATH = os.environ["BETAS_PATH"]
 
 
 def weighted_cdf(data, bins, weights):
@@ -32,10 +30,10 @@ def compute_cumulative_effect(
     reanalysis_local,
     region_filter,
     months,
+    betas_mmt,
     monthly=False,
     hotonly=False,
 ):
-    betas_mmt = xr.open_zarr(os.path.join(DATA_DIR, BETAS_PATH)).sel(sample=7)
 
     cdf_data = {}
     max_cdf = 0
