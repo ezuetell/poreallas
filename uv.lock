@@ -886,6 +886,18 @@ gcs = [
 ]
 
 [[package]]
+name = "ftfy"
+version = "6.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wcwidth" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a5/d3/8650919bc3c7c6e90ee3fa7fd618bf373cbbe55dff043bd67353dbb20cd8/ftfy-6.3.1.tar.gz", hash = "sha256:9b3c3d90f84fb267fe64d375a07b7f8912d817cf86009ae134aa03e1819506ec", size = 308927, upload-time = "2024-10-26T00:50:35.149Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/6e/81d47999aebc1b155f81eca4477a616a70f238a2549848c38983f3c22a82/ftfy-6.3.1-py3-none-any.whl", hash = "sha256:7c70eb532015cd2f9adb53f101fb6c7945988d023a085d127d1573dc49dd0083", size = 44821, upload-time = "2024-10-26T00:50:33.425Z" },
+]
+
+[[package]]
 name = "gcsfs"
 version = "2026.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1310,6 +1322,25 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/72/3a/79a912fbd4d8dd6fbb02bf69afd3bb72cf0c729bb3063c6f4498603db17a/jedi-0.19.2.tar.gz", hash = "sha256:4770dc3de41bde3966b02eb84fbcf557fb33cce26ad23da12c742fb50ecb11f0", size = 1231287, upload-time = "2024-11-11T01:41:42.873Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl", hash = "sha256:a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9", size = 1572278, upload-time = "2024-11-11T01:41:40.175Z" },
+]
+
+[[package]]
+name = "jenkspy"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/91/95/a1aef86df7bb9af295cdda03d218556e2f4524e4d30168b8ee6af88bfa40/jenkspy-0.4.1.tar.gz", hash = "sha256:e61e2103bed031cdfac9996604308298bc0a29f8051f09c343d9ce35af32a1f3", size = 191568, upload-time = "2024-06-03T12:51:08.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/a3/e66138a885f5bc56e2114ae46c1494de1e33f5cf1a3dbbdcd0276601e40a/jenkspy-0.4.1-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:21e47a7416833bb25d32183d71ea0cb57f2f19429d5f6619b99a5811d47b864c", size = 241609, upload-time = "2026-02-13T17:29:56.441Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/f2/9c082c37cd424e36281f22a1e5b21ea2335be7d8cab2e8546a34b40052f0/jenkspy-0.4.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:fb0b6a8a78d06a7fbb9ab60fb226469002d65ada199e820b25688b83ce4afc88", size = 239525, upload-time = "2026-02-13T17:29:58.022Z" },
+    { url = "https://files.pythonhosted.org/packages/97/bc/084d48f12525d8f56f1fb57875a3426c9d1d2fe73aadecff557b04194459/jenkspy-0.4.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:07ce9e84a6992ff4dfb0289858d5ce181f108bab04e22c7822f184d325d5c867", size = 624465, upload-time = "2026-02-13T17:29:59.814Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/e6/24069887fa9590bd30ada7f8de24cce97851750d3daac210e7b6217198e3/jenkspy-0.4.1-cp314-cp314-win_amd64.whl", hash = "sha256:c5fe8bd09c11476eb86cad03edd4a8cd51a7ab1198b39c7d9fccaf3f75e66f58", size = 232205, upload-time = "2026-02-13T17:30:08.714Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/4d/53568a704dd1da9b54d82f7b9d052f78aeeb5535d6430f4558c837492e84/jenkspy-0.4.1-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:6bede5b05168ecc88917eb96e60ede0630f9dc44864f5756a5fef5383f93a238", size = 246630, upload-time = "2026-02-13T17:30:01.619Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/54/756977de0b0838a25fed6a99d75c949ac5349e42cc96d334becef6431b34/jenkspy-0.4.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:73ea30c85fb2ac5e51d4e49ab181b212c6941f43a48b57ec74ea4667b1df3c74", size = 245802, upload-time = "2026-02-13T17:30:02.917Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/58/77113e8dadbdfc060afda90406e5daa6582903069654b8dda5e8a1796061/jenkspy-0.4.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:597a4211b1f3e28b807cafa7de7317360fe58a3fd5bef524d550024a46d3f528", size = 623978, upload-time = "2026-02-13T17:30:04.353Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/92/6c297f2f125e9f2200a51d9d53cb9fa9c71940598c4d486a393686b2769d/jenkspy-0.4.1-cp314-cp314t-win_amd64.whl", hash = "sha256:bd590f1c3376765f421dbd5817f16779a37c4522c922c6481242ab56e14d9849", size = 244715, upload-time = "2026-02-13T17:30:06.827Z" },
 ]
 
 [[package]]
@@ -2094,9 +2125,11 @@ dependencies = [
     { name = "cfgrib" },
     { name = "cil-regionalization" },
     { name = "fsspec", extra = ["gcs"] },
+    { name = "ftfy" },
     { name = "geodatasets" },
     { name = "geopandas", extra = ["all"] },
     { name = "isku" },
+    { name = "jenkspy" },
     { name = "marimo" },
     { name = "matplotlib" },
     { name = "metacsv" },
@@ -2124,9 +2157,11 @@ requires-dist = [
     { name = "cfgrib", specifier = ">=0.9.15.1" },
     { name = "cil-regionalization", git = "https://github.com/ClimateImpactLab/cil_regionalization.git" },
     { name = "fsspec", extras = ["gcs"], specifier = ">=2026.4.0" },
+    { name = "ftfy", specifier = ">=6.3.1" },
     { name = "geodatasets", specifier = ">=2026.5.1" },
     { name = "geopandas", extras = ["all"], specifier = ">=1.1.3" },
     { name = "isku", specifier = ">=0.3.0" },
+    { name = "jenkspy", specifier = ">=0.4.1" },
     { name = "marimo", specifier = ">=0.23.8" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "metacsv", specifier = ">=0.1.1" },
@@ -3078,6 +3113,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c4/1f/fa18009dea8469069cca78a4e877a008ab78f08b064bfc9ab891579077ff/uvicorn-0.49.0.tar.gz", hash = "sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3", size = 91284, upload-time = "2026-06-03T22:01:30.448Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/fa/e1388bbcf24ef3274f45c0c1c7b501fd14971037c1b6ee23610553307497/uvicorn-0.49.0-py3-none-any.whl", hash = "sha256:ba3d14c3ee7e41c6c654c46c9eb489d33213cdd30aa1696eab1374337c13f68f", size = 71376, upload-time = "2026-06-03T22:01:29.037Z" },
+]
+
+[[package]]
+name = "wcwidth"
+version = "0.8.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/57/ed58088fafdf4c55a0ad6bde846502567645424d7ebf325230b9237f4085/wcwidth-0.8.3.tar.gz", hash = "sha256:d128512515fbf4612e0ff21fd6380399210318b7b54a9af59dff8454cf9730eb", size = 1458450, upload-time = "2026-08-28T18:10:06.875Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl", hash = "sha256:d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4", size = 331669, upload-time = "2026-08-28T18:10:04.909Z" },
 ]
 
 [[package]]
