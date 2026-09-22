@@ -335,10 +335,10 @@ def aggregate_by_iso(ds, polygon, operation="sum"):
     iso_map = polygon["ISO"].reindex(ds["region"].values)
     ds = ds.assign_coords(ISO=("region", iso_map.to_numpy(dtype=object)))
 
-    grouped = ds.groupby("ISO")
+    grouped = ds.swap_dims({"region": "ISO"}).groupby("ISO")
     if operation == "sum":
         # Sum total deaths
-        ds = grouped.sum(dim="region")
+        ds = grouped.sum(dim="ISO")
     else:
         raise ValueError(f"Unsupported operation: {operation!r}")
     # Dissolve Impact Region geometry to ISO level
@@ -359,9 +359,17 @@ def aggregate_impact(impact, config, group_level): #Needs validation
     if group_level == "ISO":
         if config.rate:
             # Pop-weighting total deaths required
-            raise ValueError("ISO grouping is not supported when rate=True")
-        impact, _ = aggregate_by_iso(impact, config.polygons, operation="sum")
-        return impact, "ISO", ["ISO"]
+            impact, pop = xr.align(impact, config.socioeconomics['pop'], join='exact')
+            pop_total = impact * pop
+            # Population by ISO
+            pop_ISO, _ = aggregate_by_iso(config.socioeconomics['pop'], config.polygons, operation="sum")
+            # Total Deaths by ISO
+            impact_rate_ISO, _ = aggregate_by_iso(pop_total, config.polygons, operation="sum")
+            return impact_rate_ISO/pop_ISO, "ISO", ["ISO"]
+        else:
+            # Sum total deaths
+            impact, _ = aggregate_by_iso(impact, config.polygons, operation="sum")
+            return impact, "ISO", ["ISO"]
 
     if group_level == "ADM1":
         impact = redistribute_adm1(impact, config)
