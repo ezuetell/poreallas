@@ -5,7 +5,6 @@
 import xarray as xr
 import pandas as pd
 import geopandas as gpd
-import dask_geopandas
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
