@@ -239,7 +239,7 @@ def plot_monthly(
         present = set(gdf["month"].unique())
         months = [m for m in month_order if m in present]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 6))
+    fig, axes = plt.subplots(2, 3, figsize=(16, 6),gridspec_kw={"wspace": 0.02, "hspace": 0.02}, constrained_layout=True)
 
     for ax, month in zip(axes.flat, months):
         group = gdf[gdf["month"] == month]
@@ -268,6 +268,7 @@ def plot_monthly(
         ax=axes.ravel().tolist(),
         location="right",
         shrink=0.6,
+        pad=0.02,
         ticks=ticks,
         label=cbar_label,
     )
