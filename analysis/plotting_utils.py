@@ -5,6 +5,7 @@ import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import cartopy.crs as ccrs
 
 from analysis_utils import _get_land
 
