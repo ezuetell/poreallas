@@ -156,15 +156,22 @@ def compute_impact(
     ValueError
         If the resolved hotonly value is not one of "net", "hotonly", or "coldonly".
     """
-    # Per-call override takes priority over the config default
+    # Per-call override takes priority over the config default (helpful for multi-option plotting)
     hotonly = hotonly if hotonly is not None else config.hotonly
 
     # Check for valid chunks based on dims present
-    valid_chunks = {
-        k: v
-        for k, v in chunks.items()
-        if k in projected["/forecast_hotonly"]["effect"].dims
+    # Find datatree leaves
+    effect_dims = {
+        dim
+        for node in projected.subtree
+        if "effect" in node.data_vars
+        for dim in node["effect"].dims
     }
+    if not effect_dims:
+        raise ValueError("No 'effect' variable found in any node of the input DataTree.")
+
+    valid_chunks = {k: v for k, v in chunks.items() if k in effect_dims}
+
     # Check validity of "hotonly" item
     valid_terms = ["net", "hotonly", "coldonly"]
     if hotonly not in valid_terms:
