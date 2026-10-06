@@ -275,6 +275,36 @@ def compute_stats(da, dim="number"):
         }
     )
 
+import scipy.stats as stats
+
+def crossed_ttest(d, member_dim="number", sample_dim="sample"):
+    """Crossed-design test of mean(d) = 0 over member_dim x sample_dim,
+    vectorized over any remaining dims (e.g. region). Returns t, df, p as DataArrays."""
+    M, N = d.sizes[member_dim], d.sizes[sample_dim]
+    both = [member_dim, sample_dim]
+    # grand mean
+    g = d.mean(both)
+    # member means
+    rm = d.mean(sample_dim)
+    # sample means   
+    cn = d.mean(member_dim)  
+    # MN * var(g)
+    ms_a = N * rm.var(member_dim, ddof=1)
+    ms_c = M * cn.var(sample_dim, ddof=1)
+    resid = d - rm - cn + g
+    ms_e = resid.var(both, ddof=M + N - 1)
+    # Check for negative ms_a, ms_c values
+    ms_a, ms_c = np.maximum(ms_a, ms_e), np.maximum(ms_c, ms_e)
+    # MN * var
+    num = ms_a + ms_c - ms_e
+    # t-statistic
+    # g/sqrt(var)
+    t = g / np.sqrt(num / (M * N))
+    # effective degrees of freedom
+    df = min(M-1, N-1)
+    # p-value (two-sided)
+    p = xr.apply_ufunc(lambda t, df: 2 * stats.t.sf(np.abs(t), df), t, df)
+    return p
 
 def merge_polygon_stats(stats_ds, polygon, merge_key="region"):
     """Merge a stats Dataset onto a polygon GeoDataFrame on merge_key."""
