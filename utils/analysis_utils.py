@@ -234,6 +234,20 @@ def compute_global_impact(impact, socioeconomics, rate, group_dim="region"):
 
 
 ### Analysis Functions ###
+def region_to_xvec(da, polygons, region_dim="region"):
+    # Attach polygon geometries to a region-indexed xarray and make it an xvec geometry index
+    gdf = polygons.reset_index()
+    gdf["geometry"] = gdf.geometry.make_valid()
+
+    geoms = gdf.set_index(region_dim).loc[da[region_dim].values, "geometry"]
+
+    return (
+        da.assign_coords(geometry=(region_dim, geoms.values))
+        .swap_dims({region_dim: "geometry"})
+        .xvec.set_geom_indexes("geometry", crs=gdf.crs)
+    )
+
+
 def xarray_to_gpd(data, polygons, crs="ESRI:54030"):
     # Merge xarray with dim "region" with Impact Region Geopandas
     _polygons_data = polygons.merge(
@@ -246,12 +260,26 @@ def xarray_to_gpd(data, polygons, crs="ESRI:54030"):
     return _polygons_data
 
 
-def compute_stats(da, dim="number"):
+def crossed_sem(da, a="number", b="sample"):
+    na, nb = da.sizes[a], da.sizes[b]
+    grand = da.mean((a, b))
+    m_a = da.mean(b)
+    m_b = da.mean(a)
+
+    resid = da - m_a - m_b + grand
+    var_e = (resid**2).sum((a, b)) / ((na - 1) * (nb - 1))
+
+    var_mean = m_a.var(a, ddof=1) / na + m_b.var(b, ddof=1) / nb - var_e / (na * nb)
+    return np.sqrt(var_mean.clip(min=0))
+
+
+def compute_stats(da, dim=("number", "sample")):
     """
-    From an xarray, return statistics along dimension, 'dim' as an xr.Dataset.
+    From an xarray, return statistics over the two crossed dimensions in 'dim' as an xr.Dataset.
     """
     mean = da.mean(dim=dim)
     std = da.std(dim=dim)
+    sem = crossed_sem(da, a=dim[0], b=dim[1])
     min = da.min(dim=dim)
     max = da.max(dim=dim)
     p = da.quantile([0.10, 0.17, 0.5, 0.83, 0.9], dim=dim)
@@ -271,6 +299,7 @@ def compute_stats(da, dim="number"):
             "likely_range_IPCC": likely_range,
             "mean": mean,
             "std": std,
+            "sem": sem,
             "min": min,
             "max": max,
             "p10": p10,
@@ -679,8 +708,11 @@ def compute_area_weighted_mean(ds, lat_name="lat", lon_name="lon"):
     return ds.weighted(weights).mean((lat_name, lon_name))
 
 
-def land_only(da, lat_name="lat", lon_name="lon"):
+def land_only(da, lat_name="lat", lon_name="lon", clip_antarctica=False):
     # Clip gridded data to land mask
     da = da.rename({lon_name: "lon", lat_name: "lat"})
     mask = _get_land_mask(tuple(da.lon.values), tuple(da.lat.values))
-    return da.where(mask.notnull() & (da.lat > -60))
+    if clip_antarctica:
+        return da.where(mask.notnull() & (da.lat > -60))
+    else:
+        return da.where(mask.notnull())
