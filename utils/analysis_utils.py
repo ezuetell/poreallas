@@ -487,6 +487,8 @@ def _baseline_tag(baseline_period):
 
 
 def dataset_to_dataframe(ds):
+    if isinstance(ds, xr.DataArray):
+        ds = ds.to_dataset(name=ds.name or "value")
     if len(ds.dims) == 0:
         return pd.DataFrame({k: [v.values.item()] for k, v in ds.data_vars.items()})
     return ds.to_dataframe().reset_index()
