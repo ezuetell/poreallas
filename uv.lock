@@ -741,6 +741,24 @@ wheels = [
 ]
 
 [[package]]
+name = "fast-histogram"
+version = "0.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/77/04a9b4b5caa6e6b3a2f633b15dec0996c1559fc26e9ba73bb3d1d844c874/fast_histogram-0.14.tar.gz", hash = "sha256:390973b98af22bda85c29dcf6f008ba0d626321e9bd3f5a9d7a43e5690ea69ea", size = 47469, upload-time = "2024-04-16T20:20:03.51Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/a3/acf5d7641585da06982027a11727b174c4f9311c13b422111c5f197c1a57/fast_histogram-0.14-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:15876672df4831177344dfd0afbf5fd532c78f7bfca8bfabcb0f3d558f672e99", size = 21597, upload-time = "2024-04-16T20:19:52.579Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/2c/d4d96c78e72031f3171fb3a584b557d79d191e9bb4e93747f793c18f8623/fast_histogram-0.14-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:01f26dd20166040c50b5381f0a76635d81d5db9cfaaed7ec30103edf71e88c3f", size = 20634, upload-time = "2024-04-16T20:19:53.733Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/f9/524b8a302862bdc7100a5e0662d3fa49500af20badcabaddeec474819b8d/fast_histogram-0.14-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b425d93e4bf1b0cdc223b8fe91ca68aa53c314b8ec374027b9a215a41aa85658", size = 55480, upload-time = "2024-04-16T20:19:54.94Z" },
+    { url = "https://files.pythonhosted.org/packages/50/3e/f0dba6333dbe5c5a338d1466939c8733256a5f6d7e10615b8f96a90277e5/fast_histogram-0.14-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1f2f1d4b091fa065fc1991dd10f06812cfba7549622bf63f7888ac1c8c7ed9bb", size = 55426, upload-time = "2024-04-16T20:19:56.036Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/6e/fdd53002da2c1c5f3694eb98f015728e842c2d26dd28fba618a04efadb4a/fast_histogram-0.14-cp39-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:f1a263da3d832e8faa10c7228b23028ac4a406d2dd7cebbe89b2d8a9a6d58a0c", size = 43564, upload-time = "2024-04-16T20:19:57.317Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/bc/30658ca273e521b72faa8870dc2e5af0052d92d7e302c2ef50ab81f937cb/fast_histogram-0.14-cp39-abi3-win32.whl", hash = "sha256:b96db6ed1db9d1ce09800e88833cc8c5e9565d44748f7bf623c0694e6cce1e2d", size = 21300, upload-time = "2024-04-16T20:19:58.278Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/d6/7bdb0ea7bc96fbd633c028927f51f84982e30b08120b98193535087cc34e/fast_histogram-0.14-cp39-abi3-win_amd64.whl", hash = "sha256:ff9b83b0d9d489e3a59ef3b18342db7cf75f76ae22c7d95ca143783c6cc307a6", size = 24116, upload-time = "2024-04-16T20:19:59.244Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.29.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1678,6 +1696,20 @@ wheels = [
 ]
 
 [[package]]
+name = "mpl-scatter-density"
+version = "0.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fast-histogram" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f1/8c/f5c1ddc7d35f0337b2698b52e60f558db3bf03e80ec0b13b8f8b9e2cf2e8/mpl_scatter_density-0.8.tar.gz", hash = "sha256:2dbabdcc3f98b04af49aa8ac3efa392d9a9fe175b125b31f9d5d4c337398d633", size = 5216767, upload-time = "2024-12-03T14:16:26.809Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/e1/4ba1e8dcb4a3732e99f82fcd36d0404374e19b4f92bc10834dac8f954719/mpl_scatter_density-0.8-py3-none-any.whl", hash = "sha256:0752fe5be86c1334f0be1cb493a15b5c29712c5165d5bbbb975ca7c70614dbd0", size = 749472, upload-time = "2024-12-03T14:16:23.545Z" },
+]
+
+[[package]]
 name = "msgpack"
 version = "1.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2139,6 +2171,7 @@ dependencies = [
     { name = "marimo" },
     { name = "matplotlib" },
     { name = "metacsv" },
+    { name = "mpl-scatter-density" },
     { name = "numba" },
     { name = "numpy" },
     { name = "python-dotenv" },
@@ -2169,6 +2202,7 @@ requires-dist = [
     { name = "marimo", specifier = ">=0.23.8" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "metacsv", specifier = ">=0.1.1" },
+    { name = "mpl-scatter-density", specifier = ">=0.8" },
     { name = "numba", specifier = ">=0.65.1" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
